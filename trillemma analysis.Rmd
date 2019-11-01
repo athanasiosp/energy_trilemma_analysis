@@ -1,0 +1,587 @@
+---
+title: "A multicriteria analysis of the energy trilemma"
+author: "Athanasios Pliousis"
+date: "9/28/2019"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+library(checkpoint)
+checkpoint("2019-09-28")
+library(tidyverse)
+library(WDI)
+library(OECD)
+library(GGally)
+library(zoo)
+library(psych)
+
+```
+
+
+
+### Geting the Data from World Bank
+```{r}
+df <- WDI(country = "all", 
+          indicator = c(
+            'ff_energy_cons' = 'EG.USE.COMM.FO.ZS', # Fossil fuel energy consumption (% of total) 
+            'energy_imp_net' = 'EG.IMP.CONS.ZS',    # Energy imports, net (% of energy use)
+            'elec_losses' = 'EG.ELC.LOSS.ZS',       # Electric power transmission and distribution losses (% of output)
+            'energy_use_percap' = 'EG.USE.PCAP.KG.OE', # Energy use per capita (Energy use (kg of oil equivalent per capita)
+             # I need to calculate the five_year_geomean_energy_use_percap
+            'elec_coal' = 'EG.ELC.COAL.ZS',  # Electricity production from coal sources (% of total) 
+            'elec_hydro' = 'EG.ELC.HYRO.ZS', # Electricity production from hydroelectric sources (% of total)
+            'elec_gas' = 'EG.ELC.NGAS.ZS',   # Electricity production from natural gas sources (% of total)
+            'elec_nucler' = 'EG.ELC.NUCL.ZS',# Electricity production from nuclear sources (% of total)
+            'elec_oil' = 'EG.ELC.PETR.ZS',   # Electricity production from oil sources (% of total)
+            'elec_renew' = 'EG.ELC.RNWX.ZS', # Electricity production from renewable sources, excluding hydroelectric (% of total)
+            'co2' = 'EN.ATM.CO2E.PP.GD',     # CO2 emissions (kg per PPP $ of GDP)
+            'co2_elec_heat' = 'EN.CO2.ETOT.ZS', # CO2 emissions from electricity and heat production, total (% of total fuel combustion)
+            'energy_use_per_gdp' = 'EG.USE.COMM.GD.PP.KD', # Energy use (kg of oil equivalent) per $1,000 GDP (constant 2011 PPP) 
+            'pm2_5' = 'EN.ATM.PM25.MC.M3', # PM2.5 air pollution, mean annual exposure (micrograms per cubic meter)
+            'pump_price_gasol_usd_usd' = 'EP.PMP.SGAS.CD', # Pump price for gasoline (US$ per liter) [EP.PMP.SGAS.CD]
+            'pump_price_diesel_usd_usd' = 'EP.PMP.DESL.CD'), #Pump price for diesel fuel (US$ per liter) [EP.PMP.DESL.CD]
+          start = 2000, end = 2015, extra = TRUE)
+
+```
+
+
+
+### Filtering for OECD countries 
+```{r}
+oecd_iso <- read.csv("OECD_countries.csv", header = TRUE, stringsAsFactors = FALSE)
+
+oecd_iso <- oecd_iso %>% filter(!(iso_3 %in% c("LTU", "LVA"))) # exclude Latvia and Lithouania as they are have no data for previous years
+
+```
+
+
+```{r}
+
+df_wdi <- df %>% filter(iso3c %in% oecd_iso$iso_3) %>% as_tibble() # filtering for oecd countries and also converting to tibble
+
+df_wdi %>% summary() # missing 34 values in elec_losses, co2, co2_elec_heat and 272 in pm2_5
+
+#df_wdi %>% select(country) %>% distinct #all oecd countries are in the dataframe
+
+```
+
+So the df_wdi is missing 34 values in elec_losses, co2, co2_elec_heat. Which are the values for the year 2015. 
+Variable pm2_5 is mising 272 values from all countries and has values only for after 2010 for all countries.
+
+
+# Getting the OECD data
+
+## Getting expeduture in electricity gas and other
+
+```{r}
+oecd_final_consum_expend_households <- get_dataset("SNA_TABLE5", filter = "AUS+AUT+BEL+CAN+CHL+CZE+DNK+EST+FIN+FRA+DEU+GRC+HUN+ISL+IRL+ISR+ITA+JPN+KOR+LVA+LTU+LUX+MEX+NLD+NZL+NOR+POL+PRT+SVK+SVN+ESP+SWE+CHE+TUR+GBR+USA+EU28+NMEC+BRA+CHN+COL+CRI+IND+IDN+RUS+SAU+ZAF.P31NC+P31DC+P31CP010+P31CP011+P31CP012+P31CP020+P31CP021+P31CP022+P31CP023+P31CP030+P31CP031+P31CP032+P31CP040+P31CP041+P31CP042+P31CP043+P31CP044+P31CP045+P31CP050+P31CP051+P31CP052+P31CP053+P31CP054+P31CP055+P31CP056+P31CP060+P31CP061+P31CP062+P31CP063+P31CP070+P31CP071+P31CP072+P31CP073+P31CP080+P31CP081+P31CP082+P31CP083+P31CP090+P31CP091+P31CP092+P31CP093+P31CP094+P31CP095+P31CP096+P31CP100+P31CP101+P31CP102+P31CP103+P31CP104+P31CP105+P31CP110+P31CP111+P31CP112+P31CP120+P31CP121+P31CP122+P31CP123+P31CP124+P31CP125+P31CP126+P31CP127+P31CP122_127+P311+P312+P313+P311B+P312B+P313B+P314B+P33+P34+B1_GE.C+V+VP+VOB+VPVOB", pre_formatted = TRUE, start_time = 2000, end_time = 2015)
+
+# MEASURE: 
+#"C" = National currency, current prices,     
+#"V" = National currency, constant prices, national base year
+#"VOB" = National currency, constant prices, OECD base year
+#"VP" = National currency, constant prices, previous year prices
+#"VPVOB" = US $, constant prices, constant PPPs, OECD base year* Note: * indicates measures existing for zones and groups of # countries (see below).
+
+oecd_elec_gas_other <- oecd_final_consum_expend_households %>% 
+  filter(LOCATION %in% oecd_iso$iso_3,TRANSACT == "P31CP045", obsTime >=2000, obsTime <= 2015, MEASURE == "C") %>% 
+  select(-OBS_STATUS, -TRANSACT, -MEASURE, -POWERCODE, -REFERENCEPERIOD, -TIME_FORMAT) %>% rename(P31CP045_value = obsValue )
+
+
+oecd_elec_gas_other %>% summary()  # no missing values
+
+not_mising_elec_gas <- oecd_elec_gas_other$LOCATION %>% sort() %>% unique()
+
+missing_elec_gas <- oecd_iso %>% filter(!(oecd_iso$iso_3 %in% not_mising_elec_gas)) %>% select(country)# there are only 28 countries
+
+# The folowing countries are missing
+# 1       Chile
+# 2       Japan
+# 3       Korea
+# 4 New Zealand
+# 5 Switzerland
+# 6      Turkey
+
+
+# I can get only the measure i want directly and not get everything and then filter it.
+# 
+# test1 <- get_dataset("SNA_TABLE5", filter = "AUS+AUT+BEL+CAN+CHL+CZE+DNK+EST+FIN+FRA+DEU+GRC+HUN+ISL+IRL+ISR+ITA+JPN+KOR+LVA+LTU+LUX+MEX+NLD+NZL+NOR+POL+PRT+SVK+SVN+ESP+SWE+CHE+TUR+GBR+USA.P31CP045.C+V+VP+VOB+VPVOB", pre_formatted = TRUE)
+# 
+# test1 %>% filter(LOCATION %in% oecd_iso$iso3c, obsTime >=2000, obsTime <= 2015, MEASURE == "C")
+
+```
+
+we are missing oecd_elec_gas_other data for all the years from: 
+1       Chile
+2       Japan
+3       Korea
+4 New Zealand
+5 Switzerland
+6      Turkey
+
+
+
+
+## Getting median disposable income and GINI and number of households
+
+```{r Median Disposable Income}
+
+income_distribution_database <- get_dataset("IDD", filter = "AUS+AUT+BEL+CAN+CHL+CZE+DNK+EST+FIN+FRA+DEU+GRC+HUN+ISL+IRL+ISR+ITA+JPN+KOR+LVA+LTU+LUX+MEX+NLD+NZL+NOR+POL+PRT+SVK+SVN+ESP+SWE+CHE+TUR+GBR+USA+BRA+CHN+CRI+IND+RUS+ZAF.INCCTOTAL+ECTOTAL+KICTOTAL+SEICTOTAL+SECTOTAL+OCCTOTAL+KCTOTAL+TRRCTOTAL+TRPCTOTAL+TACTOTAL+TRPERCTOTAL+TRPOTCTOTAL+MEDIANC+INCHCTOTAL+INCACTOTAL+INCAC1+INCAC2+INCAC3+INCAC4+INCAC5+INCAC6+INCAC7+GINI+STDG+GINIB+GINIG+PALMA+P90P10+P90P50+P50P10+S80S20+PVT5B+PVTBHTOTAL+PVT5A+PMEAN5A+PMED5A+PVTAHTOTAL+PVTAATOTAL+PVTAA1+PVTAA2+PVTAA3+PVTAA4+PVTAA5+PVTAA6+PVTAA7+PVT6B+PVT6A+PMEAN6A+PMED6A+IND+SHA1+SHA2+SHA3+SHA4+SHA5+SHA6+SHA7+HHD+CPI2010+CPI2015+PPPPRC.TOT+WA+OLD.CURRENT.METH2012+METH2011", start_time = 2000, end_time = 2015, pre_formatted = TRUE)
+
+# str_idd <- get_data_structure("IDD")
+# 
+# str_idd$MEASURE
+
+### Defining Median Disposable income
+
+med_disp_income <-  income_distribution_database %>% 
+  filter(LOCATION %in% oecd_iso$iso_3, MEASURE %in% "MEDIANC", AGE == "TOT", obsTime >=2000, obsTime <= 2015) %>% 
+  select(-OBS_STATUS, - DEFINITION, -POWERCODE, -TIME_FORMAT)
+
+
+## taking into account both methods to use for the years where one is missing
+
+med_disp_income_wide <- med_disp_income %>%  
+  pivot_wider(names_from = METHODO, values_from = obsValue) %>% 
+  arrange(LOCATION ,obsTime) %>% 
+  mutate(med_disp_income_value = if_else(is.na(METH2012), METH2011, METH2012)) %>% 
+  select(-MEASURE, - AGE, -METH2012, - METH2011)
+
+
+med_disp_income_wide %>% summary() # no missing values
+
+# med_disp_income_wide %>% view() # there are different years missing for different countries but they can be filled "downup"
+
+# med_disp_income_wide$LOCATION %>% sort() %>% unique() %>% length() # there are 34 countries
+
+
+```
+
+
+
+```{r Gini Index}
+
+### Defining GINI at current prices
+
+# income_distribution_database %>% filter(grepl("GINI", MEASURE)) %>% select(MEASURE, AGE, DEFINITION) %>% distinct()
+
+# GINI - Disposable income, post taxes and transfers
+# GINIB - Market income, before taxes and transfers
+# GINIG - Gross income, before taxes
+
+gini <- income_distribution_database %>% 
+  filter(LOCATION %in% oecd_iso$iso_3, 
+         MEASURE %in% "GINI", 
+         AGE %in% "TOT", 
+         obsTime >=2000, obsTime <= 2015) %>% 
+  select(-OBS_STATUS, - DEFINITION, -POWERCODE, -TIME_FORMAT, -UNIT)
+
+
+## taking into account both methods to join the years where one is missing
+gini_wide <- gini %>% 
+  pivot_wider(names_from = METHODO, values_from = obsValue) %>% 
+  arrange(LOCATION, obsTime) %>% 
+  mutate(gini_value = if_else(is.na(METH2012), METH2011, METH2012)) %>% 
+  select(-MEASURE, -AGE, -METH2012, -METH2011)
+
+
+# gini_wide %>% summary() # no missing values
+# 
+# gini_wide$LOCATION %>% sort() %>% unique() %>% length() # there are 34 countries
+
+```
+
+
+
+```{r Total number of households}
+
+households <- income_distribution_database %>% 
+  filter(LOCATION %in% oecd_iso$iso_3, 
+         MEASURE %in% "HHD", 
+         AGE %in% "TOT", 
+         obsTime >=2000, obsTime <= 2015) %>% 
+   select(- MEASURE, -AGE, - DEFINITION, -TIME_FORMAT, -UNIT, -POWERCODE, -OBS_STATUS) %>% 
+   pivot_wider(names_from = METHODO, values_from = obsValue) %>%
+  arrange(LOCATION, obsTime) %>%
+  mutate(num_households = if_else(is.na(METH2012), METH2011, METH2012)) %>% 
+  select(-METH2012, -METH2011)
+
+
+  
+```
+
+
+
+
+##Getting the exchange rates
+
+```{r Exchange rate local to usd}
+
+exchange_rates_annual <- get_dataset("MEI_FIN", filter = "CCUS.AUS+CAN+CHL+CZE+DNK+HUN+ISL+ISR+JPN+KOR+MEX+NZL+NOR+POL+SWE+CHE+TUR+GBR+EA19+NMEC+ARG+BRA+CHN+COL+CRI+IND+IDN+RUS+ZAF.A+Q+M", start_time = 2000, end_time = 2015, pre_formatted = TRUE)
+
+#  National currency units/US dollar
+
+exchange_rates_annual <-  exchange_rates_annual %>% 
+  filter(TIME_FORMAT == "P1Y", LOCATION %in% oecd_iso$iso_3 | LOCATION %in% "EA19", ) %>% select(LOCATION, obsTime, obsValue)
+
+
+t <- oecd_iso$iso_3[!(oecd_iso$iso_3 %in% c("AUS","CAN","CZE","DNK","HUN","ISL","JPN","KOR","MEX","NZL","NOR","POL","SWE","CHE","TUR","GBR","CHL","ISR"))]
+
+
+missing_exchange <-  tibble(LOCATION = rep(t,16), obsTime = c(rep(2000,16), rep(2001,16),rep(2002,16),rep(2003,16),rep(2004,16),rep(2005,16),rep(2006,16),
+       rep(2007,16),rep(2008,16),rep(2009,16),rep(2010,16),rep(2011,16),rep(2012,16),rep(2013,16),rep(2014,16),rep(2015,16)), obsValue = 0) 
+
+
+
+for (j in 2000:2015) {
+   missing_exchange <-  missing_exchange %>% 
+     mutate(obsValue = if_else(obsTime == j, as.double(exchange_rates_annual %>% filter(LOCATION =="EA19", obsTime == j) %>% select(obsValue)), obsValue))
+}
+  
+exchange_rates_annual <- rbind(exchange_rates_annual, missing_exchange) %>% filter(LOCATION != "EA19") %>% rename("annual_exchange_usd" = obsValue)
+
+
+```
+
+
+
+
+
+## Getting the GHG gases data
+
+```{r}
+
+air_ghg_all <- get_dataset("AIR_GHG", filter = "AUS+AUT+BEL+CAN+CHL+CZE+DNK+EST+FIN+FRA+DEU+GRC+HUN+ISL+IRL+ISR+ITA+JPN+KOR+LVA+LTU+LUX+MEX+NLD+NZL+NOR+POL+PRT+SVK+SVN+ESP+SWE+CHE+TUR+GBR+USA+OECDAO+EU28+OECDE+OECD+NMEC+ARG+BRA+CHN+COL+CRI+IND+IDN+RUS+ZAF+OECDAM.GHG+CO2+CH4+N2O+HFC_PFC+HFC+PFC+SF6+NF3.TOTAL+ENER+ENER_IND+ENER_MANUF+ENER_TRANS+ENER_OSECT+ENER_OTH+ENER_FU+ENER_CO2+IND_PROC+AGR+WAS+OTH+LULUCF+AFOLU+TOTAL_LULU+INTENS+GHG_CAP+GHG_GDP+INDEX+INDEX_2000+INDEX_1990+PERCENT+ENER_P+ENER_IND_P+ENER_MANUF_P+ENER_TRANS_P+ENER_OSECT_P+ENER_OTH_P+ENER_FU_P+ENER_CO2_P+IND_PROC_P+AGR_P+WAS_P+OTH_P", start_time = 2000, end_time = 2015, pre_formatted = TRUE)
+
+
+## filtering to keep only oecd countries and total GHG per CAP, exluding LULUCF thousands tonnes of CO2 equivalent
+## details: powercode is the number refering to the size of the data. for example 6 is millions 3 is thousands etc.
+
+total_ghg_cap <- 
+  air_ghg_all %>% 
+  filter(COU %in% oecd_iso$iso_3, VAR %in% "GHG_CAP" , obsTime >=2000, obsTime <= 2015) %>% 
+  select(-POL, -TIME_FORMAT, - POWERCODE, -OBS_STATUS, -VAR, -UNIT) %>% 
+  rename(total_ghg_cap = obsValue)
+
+# total_ghg_cap %>% summary() # no missing values
+# 
+# total_ghg_cap$COU %>% sort() %>% unique() %>% length() # There are 34 countries
+
+```
+
+
+## Getting the ETCR scores
+
+```{r}
+
+etcr_all <- get_dataset("ETCR", filter = "AGG+SECT+AIR+AEN+APO+TEL+TEN+TPO+TMS+ELEC+EEN+EPO+EVI+EMS+GAS+GEN+GPO+GVI+GMS+POST+PEN+PPO+PMS+RAIL+RLEN+RLPO+RLVI+RLMS+ROAD+RDEN+RDPC+REG_PROV+EN+PO+XPO.AUS+AUT+BEL+CAN+CHL+CZE+DNK+EST+FIN+FRA+DEU+GRC+HUN+ISL+IRL+ISR+ITA+JPN+KOR+LVA+LTU+LUX+MEX+NLD+NZL+NOR+POL+PRT+SVK+SVN+ESP+SWE+CHE+TUR+GBR+USA+NMEC+BRA+BGR+CHN+HRV+CYP+IND+IDN+MLT+ROU+ZAF", start_time = 2000, end_time = 2015, pre_formatted = TRUE)
+
+# etcr = `OECD - Aggregate ETCR (average Electricity, Gas)`
+
+etcr_elec_gas <-  
+  etcr_all %>% 
+  filter(COU %in% oecd_iso$iso_3, 
+         IND %in% c("ELEC", "GAS"), 
+         obsTime >=2000, obsTime <= 2015) %>% 
+  select(-TIME_FORMAT) %>% 
+  pivot_wider(names_from = IND, values_from = obsValue) %>% 
+  mutate(etcr_mean_elec_gas = (ELEC + GAS)/2) %>% 
+    select(-ELEC, - GAS)
+
+# etcr_elec_gas %>% view() # summary() Missing is the ISL-Iceland
+# 
+# etcr_elec_gas$COU %>% sort() %>% unique() %>% length()
+
+
+# dataset_list <- get_datasets()
+# 
+# etcr_str <- get_data_structure("ETCR")
+
+# explanation-description of indicator shortnames
+# etcr_str$IND
+
+```
+
+
+We are missing Iceland for the etcr_elec_gas variable
+
+
+
+## Getting the Environmetally Adjusted Multifactor Productivity measusres
+
+```{r}
+eamfi <- get_dataset("EAMFP", filter = "AUS+AUT+BEL+CAN+CHL+CZE+DNK+EST+FIN+FRA+DEU+GRC+HUN+ISL+IRL+ISR+ITA+JPN+KOR+LVA+LTU+LUX+MEX+NLD+NZL+NOR+POL+PRT+SVK+SVN+ESP+SWE+CHE+TUR+GBR+USA+ARG+BRA+BGR+CHN+COL+CRI+HRV+CYP+IND+IDN+MLT+ROU+RUS+SAU+ZAF.PA_GDP_G+GDP_G+P_ADJ_ALL_G+L_CONTR_G+K_CONTR_G+NK_CONTR_ALL_G+EAMFP_G", start_time = 2000, end_time = 2015, pre_formatted = TRUE)
+
+# eamfi_str <- get_data_structure("EAMFP")
+
+
+# explanation-description of indicator shortnames
+# eamfi_str
+
+#  P_ADJ_ALL_G == Adjustment for pollution abatement
+
+# EAMFP_G == Environmentally adjusted multifactor productivity growth 
+
+eamfi_wide <- eamfi %>% 
+  filter(COU %in% oecd_iso$iso_3, 
+         VAR %in% c("P_ADJ_ALL_G", "EAMFP_G"), 
+         obsTime >=2000, obsTime <= 2015) %>% 
+  select(-TIME_FORMAT) %>% 
+  pivot_wider(names_from = VAR, values_from = obsValue) %>% 
+  rename("adj_pol_abatement" = P_ADJ_ALL_G, "eamfi_growth" = EAMFP_G)
+
+# eamfi_wide %>% summary()
+# eamfi_wide$COU %>% sort() %>% unique() # there are no missing countries and values
+
+
+```
+
+
+
+## Getting the Environmetal Policy Stringency
+```{r}
+
+EPS <- get_dataset("EPS", filter = "AUS+AUT+BEL+CAN+CZE+DNK+FIN+FRA+DEU+GRC+HUN+IRL+ITA+JPN+KOR+MEX+NLD+NOR+POL+PRT+SVK+SVN+ESP+SWE+CHE+TUR+GBR+USA+NMEC+BRA+CHN+IND+IDN+RUS+ZAF.EPS+EPS_MKT+TAXES+TAXCO2+TAXDIESEL+TAXNOX+TAXSOX+TRADESCH+TRADESCH_REC+TRADESCH_CO2+TRADESCH_EEF+FIT+FIT_WIND+FIT_SOLAR+EPS_NMKT+STD+ELV_NOX+ELV_SOX+ELV_PM+ELV_DIESELSO+RD_SUB+RD_RE", start_time = 2000, end_time = 2015, pre_formatted = TRUE)
+
+# EPS == Environmental Policy Stringency
+# EPS$VAR %>% table()
+
+env_pol_string <- 
+  EPS %>% 
+  filter(COU %in% oecd_iso$iso_3, VAR %in% "EPS", obsTime >=2000, obsTime <= 2015) %>% 
+  select(-VAR, -TIME_FORMAT) %>% 
+  rename(EPS = obsValue)
+
+# env_pol_string$COU %>% unique() %>% sort() %>% length() # there are data only for 28 countries
+# 
+# not_missing_iso_3 <- env_pol_string$COU %>%  unique() 
+# 
+# missing_env_pl_string <- oecd_iso %>% filter(!(oecd_iso$iso_3 %in% not_missing_iso_3)) %>% select(country)
+
+```
+
+We have missing values for the EPS variable for alla the years in:
+      country
+1       Chile
+2     Estonia
+3     Iceland
+4      Israel
+5  Luxembourg
+6 New Zealand
+
+
+
+
+
+```{r green growth measures}
+#Economic oportunities and policy responses
+
+green_growth <- get_dataset("GREEN_GROWTH", filter = "AUS+AUT+BEL+CAN+CHL+CZE+DNK+EST+FIN+FRA+DEU+GRC+HUN+ISL+IRL+ISR+ITA+JPN+KOR+LVA+LTU+LUX+MEX+NLD+NZL+NOR+POL+PRT+SVK+SVN+ESP+SWE+CHE+TUR+GBR+USA+OECDAO+EA19+EU28+G7M+G20+OECDE+OECD+WLD+NMEC+AFG+ALB+DZA+ASM+AND+AGO+AIA+ATA+ATG+ARG+ARM+ABW+AZE+BHS+BHR+BGD+BRB+BLR+BLZ+BEN+BMU+BTN+BOL+BIH+BWA+BRA+BRN+BGR+BFA+BDI+KHM+CMR+CPV+CAF+TCD+CHN+COL+COG+COD+CRI+CIV+HRV+CUB+CYP+DJI+DOM+ECU+EGY+SLV+GNQ+ERI+ETH+GMB+GEO+GHA+GTM+GIN+HTI+HND+IND+IDN+IRN+IRQ+JAM+JOR+KAZ+KEN+KIR+KWT+KGZ+LAO+LBN+LSO+LBR+LBY+LIE+MDG+MWI+MYS+MDV+MLI+MLT+MTQ+MRT+MUS+MYT+FSM+MDA+MCO+MNG+MNE+MSR+MAR+MOZ+MMR+NAM+NRU+NIC+NER+MKD+NGA+OMN+PAK+PLW+PAN+PNG+PRY+PER+PHL+PRI+QAT+ROU+RUS+RWA+WSM+SMR+STP+SAU+SEN+SRB+SYC+SLE+SGP+SLB+SOM+ZAF+LKA+SUR+SWZ+SYR+TJK+TZA+THA+TGO+TKL+TON+TTO+TUN+TKM+TCA+TUV+UGA+UKR+ARE+URY+UZB+VUT+VEN+VNM+YEM+ZMB+ZWE+GRPS+ASEAN+BRIICS+OECDAM+EECCA+LAC+MENA.ECOPOL+TECHPAT_PAT+GPAT_DE_AT+GPAT_DE_RTA+GPAT_DE_AI+GPAT_DE_CAP+TECHPAT_RD+ENVRD_GBAORD+ENVRD_GDP+RERD_ERD+ERD_GDP+FFRD_ERD+IFF_ODA+ODA_ENV+ODA_BIO+ODA_CCMIT+ODA_CCADP+ODA_DES+ODA_RE+ODA_WATER+ODA_ENVSEC+ODA_GNI+ENVTAXTRANS+ENVTAX_GDP+ENVTAX_TR+ENVTAX_NRG+ENVTAX_VEH+FTAX_PET+FPRICE_PET+FTAX_DIE+FPRICE_DIE+FIT_SOLAR+FIT_WIND+CSE_ENET+CSE_TOTT+CSE_FFS+PSE_FFS+GSSE_FFS+PET_FFS+COAL_FFS+NATG_FFS+FFS_TTAX", start_time = 2000, end_time = 2015, pre_formatted = TRUE)
+
+
+# get_datasets() %>% view()
+
+# green_list <- get_data_structure("GREEN_GROWTH") 
+# 
+# green_list$VAR %>% view()
+
+
+# ENVRD_GBAORD == Environmentally related government R&D budget, % total government R&D == env_rnd
+
+env_rnd <- 
+  green_growth %>% 
+  filter(COU %in% oecd_iso$iso_3, VAR == "ENVRD_GBAORD", obsTime >=2000, obsTime <= 2015) %>% 
+  select(-VAR, - TIME_FORMAT, -UNIT, -POWERCODE, -REFERENCEPERIOD, -OBS_STATUS) %>% 
+  rename(env_govern_rnd = obsValue)
+
+# env_rnd$COU %>% unique() %>% sort() %>% length() # there are 34 countries
+# env_rnd %>% summary() # there are no missing values
+
+# GPAT_DE_RTA == Relative advantage in environment-related technology
+
+rel_env_adv <- 
+  green_growth %>% 
+  filter(COU %in% oecd_iso$iso_3, VAR == "GPAT_DE_RTA", obsTime >=2000, obsTime <= 2015) %>% 
+  select(-VAR, - TIME_FORMAT, -UNIT, -POWERCODE, -REFERENCEPERIOD, -OBS_STATUS) %>% 
+  rename(rel_adv_envtech = obsValue)
+
+# rel_env_adv$COU %>% unique() %>% sort() %>% length() # there are 34 countries
+# rel_env_adv %>% summary() # there are no missing values
+
+
+```
+
+
+
+
+```{r}
+CPI <- get_dataset("PRICES_CPI", filter = "AUS+AUT+BEL+CAN+CHL+CZE+DNK+EST+FIN+FRA+DEU+GRC+HUN+ISL+IRL+ISR+ITA+JPN+KOR+LVA+LTU+LUX+MEX+NLD+NZL+NOR+POL+PRT+SVK+SVN+ESP+SWE+CHE+TUR+GBR+USA+EA19+EU28+G-7+OECDE+G-20+OECD+NMEC+ARG+BRA+CHN+COL+CRI+IND+IDN+RUS+SAU+ZAF.CPGREN01.GY.A", start_time = 2000, end_time = 2015, pre_formatted = TRUE)
+# The OECD reference year has changed from 2010 to 2015
+
+# CPI <- CPI %>% arrange(LOCATION)
+
+cpi_enrg <- CPI %>% filter(LOCATION %in% oecd_iso$iso_3) %>% rename("cpi_energy" = obsValue) %>%  select(LOCATION, obsTime, cpi_energy)  # there are all 34 countries
+
+```
+
+
+# Joining all databases
+
+```{r joining the data}
+
+# oecd_elec_gas_other
+# med_disp_income_wide
+# gini_wide
+# total_ghg_cap
+# etcr_elec_gas
+# eamfi_wide
+# env_pol_string
+# env_rnd
+# rel_env_adv
+# exchange_rates_annual
+# cpi_enrg
+# households
+#joining the oecd data
+
+oecd_full <- 
+  full_join(oecd_elec_gas_other, med_disp_income_wide, by = c("LOCATION", "UNIT", "obsTime")) %>% 
+  full_join(., gini_wide, by = c("LOCATION", "obsTime")) %>%  
+  full_join(., total_ghg_cap, by = c("LOCATION" = "COU", "obsTime")) %>% 
+  full_join(., etcr_elec_gas, by = c("LOCATION" = "COU", "obsTime")) %>% 
+  full_join(., eamfi_wide, by = c("LOCATION" = "COU", "obsTime")) %>% 
+  full_join(., env_pol_string, by = c("LOCATION" = "COU", "obsTime")) %>% 
+  full_join(., env_rnd, by = c("LOCATION" = "COU", "obsTime")) %>% 
+  full_join(., rel_env_adv, by = c("LOCATION" = "COU", "obsTime")) %>% 
+  full_join(., exchange_rates_annual, by = c("LOCATION", "obsTime")) %>% 
+  full_join(., cpi_enrg, by = c("LOCATION", "obsTime")) %>% 
+  full_join(., households,  by = c("LOCATION", "obsTime"))
+ 
+
+
+
+df_wdi <- df_wdi %>% arrange(iso3c, year) %>% select(iso2c, iso3c, everything()) 
+
+# converting year to character to be able to join with obsTime
+df_wdi$year <- as.character(df_wdi$year) 
+
+# converting iso3 to character to be able to join with LOCATION. 
+# If left as is it is coersed automaticaly to characher
+
+df_wdi$iso3c <- as.character(df_wdi$iso3c) 
+
+data_all <- full_join(df_wdi, oecd_full, by = c("iso3c" = "LOCATION", "year" = "obsTime"))
+ 
+
+# summary(data_all)
+# 
+# 
+# data_all %>%  filter(UNIT == "EUR") %>% select(iso3c, country, UNIT ) %>% distinct(country)
+
+# custom function for the geometric average
+
+# geo_mean <- function(x){exp(log(x+1)-1)}
+
+```
+
+
+Filling the missing values respecting country grouping to control for completely missing country-values
+
+```{r}
+data_all <- data_all %>%
+  arrange(country, year) %>%
+  group_by(country) %>% 
+  fill(ff_energy_cons:num_households, .direction = "downup") %>% 
+  ungroup()
+
+
+summary(data_all)
+
+# douleuei to idio kala me to parapanw arkei na min allaxei i seira ton metavliton kai meinei kapoia ektos
+# 
+# data_all %>%
+#   arrange(country, year) %>%
+#   group_by(country) %>% 
+#   fill(elec_losses:env_govern_rnd, .direction = "downup") %>% summary()
+```
+
+Now we have missing from 
+
+P31CP045_value:  Chile, Japan, Korea, New Zealand, Switzerland, Turkey
+
+etcr_mean_elec_gas: Iceland
+
+EPS:  Chile, Estonia, Iceland, Israel, Luxembourg, New Zealand
+
+We will replace the NA values with the mean of each year of all the rest of the countries.
+
+```{r}
+data_all <- data_all %>%
+  arrange(year,country) %>%
+  group_by(year) %>%
+  # mutate(mean_etcr = mean(etcr_mean_elec_gas, na.rm=TRUE),
+  #        mean_P31CP045_value = mean(P31CP045_value, na.rm = TRUE),
+  #        mean_EPS = mean(EPS, na.rm = TRUE)) %>% 
+  mutate(etcr_mean_elec_gas = replace_na(etcr_mean_elec_gas, mean(etcr_mean_elec_gas, na.rm=TRUE)),
+         P31CP045_value = replace_na(P31CP045_value, mean(P31CP045_value, na.rm = TRUE)),
+         EPS = replace_na(EPS, mean(EPS,na.rm = TRUE))) %>% 
+  ungroup()
+  
+
+# ** I will need to ungroup to allow the tibble to be free for other groupings or manupilations 
+
+summary(data_all) # data is clean and filled.
+  
+
+```
+ 
+
+
+```{r}
+data_all <-  data_all %>%
+  arrange(country, year) %>%
+  group_by(country) %>%
+  mutate(energy_use_percap_change = energy_use_percap / lag(energy_use_percap),
+         # rollapply from zoo, geometric.mean from psych
+         five_year_geomean_energy_use_percap = rollapply(energy_use_percap_change, 5, geometric.mean, fill = NA, align = "right") - 1,
+         five_year_geomean_cpi_energy = rollapply(1 + (cpi_energy/100), 5, geometric.mean, fill = NA, align = "right") -1 ) %>% 
+  ungroup()
+```
+
+
+
+
+```{r}
+data_all <- data_all %>% 
+  group_by(country, year) %>% 
+  mutate(median_disp_inc_usd = med_disp_income_value / annual_exchange_usd,
+         P31CP045_value_usd = P31CP045_value / annual_exchange_usd,
+         mean_transp_fuel_price_usd = (pump_price_gasol_usd_usd + pump_price_diesel_usd_usd) / 2,
+         #it calculates the percentage over income of a household
+         rel_pp_elec_gas = (P31CP045_value_usd*1000000 / num_households) /median_disp_inc_usd,
+         # it calculates the purchasing power of income in liters of fuel
+         rel_pp_transp_fuel = median_disp_inc_usd / mean_transp_fuel_price_usd, 
+         hhi = sum(elec_coal^2, elec_hydro^2, elec_gas^2, elec_nucler^2, elec_oil^2 ,elec_renew^2) / 10000) %>% 
+  ungroup()
+```
+
+
+
+
+
+# EDA
+
+```{r}
+data_all %>% 
+  select(-c(region:UNIT)) %>% 
+  pivot_longer(cols = c(ff_energy_cons:pump_price_diesel_usd_usd, P31CP045_value:hhi), names_to = "key", values_to = "value") %>%  
+  ggplot(aes(value)) + 
+  geom_histogram() +
+  facet_wrap(~ key, scales = "free") 
+  
+```
+
+
