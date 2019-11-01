@@ -109,7 +109,9 @@ missing_elec_gas <- oecd_iso %>% filter(!(oecd_iso$iso_3 %in% not_mising_elec_ga
 
 # I can get only the measure i want directly and not get everything and then filter it.
 # 
-# test1 <- get_dataset("SNA_TABLE5", filter = "AUS+AUT+BEL+CAN+CHL+CZE+DNK+EST+FIN+FRA+DEU+GRC+HUN+ISL+IRL+ISR+ITA+JPN+KOR+LVA+LTU+LUX+MEX+NLD+NZL+NOR+POL+PRT+SVK+SVN+ESP+SWE+CHE+TUR+GBR+USA.P31CP045.C+V+VP+VOB+VPVOB", pre_formatted = TRUE)
+# test1 <- get_dataset("SNA_TABLE5", 
+# filter = "AUS+AUT+BEL+CAN+CHL+CZE+DNK+EST+FIN+FRA+DEU+GRC+HUN+ISL+IRL+ISR+ITA+JPN+KOR+LVA+LTU+LUX+MEX+NLD+NZL+NOR+POL+
+# PRT+SVK+SVN+ESP+SWE+CHE+TUR+GBR+USA.P31CP045.C+V+VP+VOB+VPVOB", pre_formatted = TRUE)
 # 
 # test1 %>% filter(LOCATION %in% oecd_iso$iso3c, obsTime >=2000, obsTime <= 2015, MEASURE == "C")
 
@@ -500,12 +502,7 @@ data_all <- data_all %>%
 
 summary(data_all)
 
-# douleuei to idio kala me to parapanw arkei na min allaxei i seira ton metavliton kai meinei kapoia ektos
-# 
-# data_all %>%
-#   arrange(country, year) %>%
-#   group_by(country) %>% 
-#   fill(elec_losses:env_govern_rnd, .direction = "downup") %>% summary()
+
 ```
 
 Now we have missing from 
